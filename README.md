@@ -2,6 +2,8 @@
 
 Agent de développement local-first pour Windows, Linux et macOS, exécuté avec Node.js et votre serveur Ollama.
 
+L’interface terminal plein écran adopte un style minimal : en-tête compact, journal conversationnel, prompt séparé et barre d’état. Tapez `/` pour ouvrir le sélecteur de commandes, utilisez ↑/↓ pour choisir, puis `Tab` ou Entrée pour compléter. Utilisez `?` pour les raccourcis, et `Esc` (ou `Ctrl+C`) pour interrompre une requête en cours.
+
 ## Installation
 
 ### Linux / macOS
@@ -30,6 +32,8 @@ craftpick-code ./mon-projet
 craftpick-code --model gpt-oss:120b-cloud
 craftpick-code -p "analyse le projet et propose un plan"
 ```
+
+Les alias `--model gemma4` et `/model gemma4` sélectionnent `gemma4:31b-cloud`. Les alias `gpt` et `gpt-oss` sélectionnent `gpt-oss:120b-cloud`.
 
 La configuration se trouve dans `~/.craftpick-code/config.json` (Windows : `%USERPROFILE%\.craftpick-code\config.json`). Utilisez `CRAFTPICK_OLLAMA_URL` et `CRAFTPICK_MODEL` pour la surcharger au premier lancement.
 

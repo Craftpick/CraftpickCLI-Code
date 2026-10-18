@@ -12,6 +12,13 @@ const VERSION = '1.0.0';
 const HOME = os.homedir();
 const DATA = path.join(HOME, '.craftpick-code');
 const CONFIG = path.join(DATA, 'config.json');
+const USAGE_FILE = path.join(DATA, 'usage.json');
+const DAILY_TOKEN_LIMIT = 10_000_000;
+const MODEL_ALIASES = {
+  gemma4: 'gemma4:31b-cloud',
+  gpt: 'gpt-oss:120b-cloud',
+  'gpt-oss': 'gpt-oss:120b-cloud'
+};
 const args = process.argv.slice(2);
 const noColor = args.includes('--no-color') || !output.isTTY;
 const paint = (code, text) => noColor ? text : `\x1b[${code}m${text}\x1b[0m`;
@@ -21,6 +28,7 @@ const cyan = text => paint('36', text);
 const green = text => paint('32', text);
 const yellow = text => paint('33', text);
 const red = text => paint('31', text);
+const surface = text => paint('48;5;237', text);
 const defaults = {
   ollamaUrl: process.env.CRAFTPICK_OLLAMA_URL || 'http://82.26.80.20:11434',
   model: process.env.CRAFTPICK_MODEL || 'gemma4:31b-cloud',
@@ -33,6 +41,21 @@ let enabledSkills = new Set();
 let messages = [];
 let ui = null;
 let activeRequest = null;
+let usage = { day: '', inputTokens: 0, outputTokens: 0, requests: 0 };
+const COMMANDS = [
+  { name: '/help', description: 'Afficher les commandes et raccourcis' },
+  { name: '/skills', description: 'Lister les skills disponibles' },
+  { name: '/skill <nom>', description: 'Activer ou désactiver un skill' },
+  { name: '/model <nom>', description: 'Choisir le modèle Ollama' },
+  { name: '/init', description: 'Créer le fichier CRAFTPICK.md' },
+  { name: '/review <demande>', description: 'Lancer une revue de code' },
+  { name: '/usage', description: 'Afficher l’usage quotidien des tokens' },
+  { name: '/status', description: 'Afficher le statut de la session' },
+  { name: '/new', description: 'Démarrer une nouvelle conversation' },
+  { name: '/config', description: 'Afficher la configuration' },
+  { name: '/clear', description: 'Effacer la conversation affichée' },
+  { name: '/exit', description: 'Quitter CraftpickAI Code' }
+];
 
 class TerminalUI {
   constructor() {
@@ -44,6 +67,7 @@ class TerminalUI {
     this.busy = false;
     this.status = 'Prêt';
     this.showHelp = false;
+    this.commandIndex = 0;
   }
 
   start() {
@@ -84,6 +108,20 @@ class TerminalUI {
     return lines;
   }
 
+  commandMatches() {
+    if (!this.value.startsWith('/')) return [];
+    const query = this.value.slice(1).toLowerCase().split(/\s/)[0];
+    return COMMANDS.filter(command => command.name.slice(1).startsWith(query));
+  }
+
+  completeCommand() {
+    const matches = this.commandMatches();
+    if (!matches.length) return false;
+    this.commandIndex = Math.min(this.commandIndex, matches.length - 1);
+    this.value = matches[this.commandIndex].name.replace(/ <[^>]+>$/, ' ');
+    return true;
+  }
+
   append(kind, text) {
     this.entries.push({ kind, text: String(text) });
     this.render();
@@ -107,16 +145,25 @@ class TerminalUI {
     const width = columns - 4;
     const transcript = [];
     for (const entry of this.entries) {
-      const prefix = entry.kind === 'user' ? cyan('> ') : entry.kind === 'tool' ? yellow('› ') : entry.kind === 'error' ? red('! ') : green('● ');
+      const prefix = entry.kind === 'user' ? cyan('› ') : entry.kind === 'tool' ? yellow('› ') : entry.kind === 'error' ? red('! ') : green('└ ');
       const indent = '  ';
       const wrapped = this.wrap(entry.text, width - 2);
-      wrapped.forEach((line, index) => transcript.push(index === 0 ? `${prefix}${line}` : `${indent}${line}`));
+      wrapped.forEach((line, index) => {
+        if (entry.kind === 'user' && index === 0) transcript.push(surface(this.truncate(`${prefix}${line}`, width)));
+        else transcript.push(index === 0 ? `${prefix}${line}` : `${indent}${line}`);
+      });
       transcript.push('');
     }
-    const room = Math.max(3, rows - (this.showHelp ? 13 : 10));
+    const commandMatches = this.commandMatches();
+    this.commandIndex = Math.min(this.commandIndex, Math.max(0, commandMatches.length - 1));
+    const suggestions = commandMatches.slice(0, 6).map((command, index) => {
+      const active = index === this.commandIndex;
+      return `${active ? cyan('›') : dim(' ')} ${active ? bold(command.name) : command.name.padEnd(20)} ${dim(command.description)}`;
+    });
+    const room = Math.max(3, rows - (this.showHelp ? 13 : 10) - (suggestions.length ? suggestions.length + 2 : 0));
     const shown = transcript.slice(-room);
-    const logo = cyan('✦');
-    const modelLine = `${dim('Model')} ${bold(config.model)} ${dim('·')} ${dim(this.truncate(workspace, Math.max(18, width - 34)))}`;
+    const mark = [cyan('   ▄██▄'), cyan('  █ CP █'), cyan('   ▀██▀')];
+    const modelLine = `${dim('Ollama')} ${bold(config.model)} ${dim('· Local agent')}`;
     const status = this.busy ? yellow(`● ${this.status}`) : green('● Prêt');
     const rule = dim('─'.repeat(width));
     const help = this.showHelp
@@ -129,16 +176,18 @@ class TerminalUI {
       : [];
     const footer = this.busy
       ? `${yellow('●')} ${dim('Traitement en cours')}  ${dim('·')} ${cyan('Esc')} ${dim('pour interrompre')}`
-      : `${dim('? pour les raccourcis')}  ${dim('·')} ${yellow('Mode confirmations')}  ${dim('·')} ${cyan('Tab')} ${dim('aide')}`;
+      : `${dim('? raccourcis')}  ${dim('·')} ${yellow('Confirmations actives')}  ${dim('·')} ${cyan('Tab')} ${dim('commandes')}`;
     const content = [
-      `${logo} ${bold('CraftpickAI Code')} ${dim(`v${VERSION}`)}`,
-      `  ${modelLine}`,
-      `  ${status}`,
+      `${mark[0]}   ${bold('CraftpickAI Code')} ${dim(`v${VERSION}`)}`,
+      `${mark[1]}   ${modelLine}`,
+      `${mark[2]}   ${dim(this.truncate(workspace, width - 12))}`,
+      `          ${status}`,
       '',
       ...help,
       ...(shown.length ? shown : [dim('Décrivez une tâche de développement pour commencer.')]),
       rule,
-      `${cyan('>')} ${this.value}${this.busy ? dim('  …') : ''}`,
+      `${cyan('›')} ${this.value}${this.busy ? dim('  …') : ''}`,
+      ...(suggestions.length ? [dim('  Commandes'), ...suggestions] : []),
       rule,
       footer
     ].join('\n');
@@ -170,12 +219,20 @@ class TerminalUI {
       return;
     }
     if (!this.waiter) return;
+    const commandMatches = this.commandMatches();
+    if (key.name === 'tab' && commandMatches.length) {
+      this.completeCommand();
+      this.render();
+      return;
+    }
     if (key.name === 'tab') {
       this.showHelp = !this.showHelp;
       this.render();
       return;
     }
     if (key.name === 'return') {
+      if (this.value === '/' && this.completeCommand()) { this.render(); return; }
+      if (this.value.startsWith('/') && commandMatches.length && this.value.indexOf(' ') === -1) this.completeCommand();
       const value = this.value.trim();
       if (!value) return;
       this.history.push(value);
@@ -188,6 +245,10 @@ class TerminalUI {
     }
     if (key.name === 'backspace') {
       this.value = this.value.slice(0, -1);
+    } else if (key.name === 'up' && commandMatches.length) {
+      this.commandIndex = (this.commandIndex - 1 + commandMatches.length) % commandMatches.length;
+    } else if (key.name === 'down' && commandMatches.length) {
+      this.commandIndex = (this.commandIndex + 1) % commandMatches.length;
     } else if (key.name === 'up') {
       this.historyIndex = Math.max(0, this.historyIndex - 1);
       this.value = this.history[this.historyIndex] || '';
@@ -196,12 +257,13 @@ class TerminalUI {
       this.value = this.history[this.historyIndex] || '';
     } else if (key.sequence?.length === 1 && !key.ctrl && !key.meta) {
       this.value += key.sequence;
+      this.commandIndex = 0;
     }
     this.render();
   }
 }
 
-function usage() {
+function printUsage() {
   console.log(`CraftpickAI Code ${VERSION}\n\nUsage: craftpick-code [directory] [-p "task"] [--model name] [--no-color]`);
 }
 
@@ -213,6 +275,54 @@ async function loadConfig() {
 
 async function saveConfig() {
   await fs.writeFile(CONFIG, JSON.stringify(config, null, 2), 'utf8');
+}
+
+function resolveModel(value) {
+  const requested = String(value || '').trim();
+  return MODEL_ALIASES[requested.toLowerCase()] || requested;
+}
+
+function localDay() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+function totalTokens() {
+  return usage.inputTokens + usage.outputTokens;
+}
+
+function remainingTokens() {
+  return Math.max(0, DAILY_TOKEN_LIMIT - totalTokens());
+}
+
+async function loadUsage() {
+  try { usage = { ...usage, ...JSON.parse(await fs.readFile(USAGE_FILE, 'utf8')) }; } catch { /* first launch */ }
+  if (usage.day !== localDay()) usage = { day: localDay(), inputTokens: 0, outputTokens: 0, requests: 0 };
+  await saveUsage();
+}
+
+async function saveUsage() {
+  await fs.mkdir(DATA, { recursive: true });
+  await fs.writeFile(USAGE_FILE, JSON.stringify(usage, null, 2), 'utf8');
+}
+
+async function recordUsage(request, response) {
+  const input = Number(response.prompt_eval_count ?? response.prompt_tokens ?? 0);
+  const output = Number(response.eval_count ?? response.completion_tokens ?? 0);
+  const estimatedInput = Math.ceil(JSON.stringify(request.messages || []).length / 4);
+  const estimatedOutput = Math.ceil(String(response.message?.content || '').length / 4);
+  usage.inputTokens += Number.isFinite(input) && input > 0 ? input : estimatedInput;
+  usage.outputTokens += Number.isFinite(output) && output > 0 ? output : estimatedOutput;
+  usage.requests += 1;
+  await saveUsage();
+}
+
+function usageText() {
+  const used = totalTokens();
+  const percent = Math.min(100, (used / DAILY_TOKEN_LIMIT) * 100).toFixed(2);
+  return `Usage du ${usage.day}\n${used.toLocaleString('fr-FR')} / ${DAILY_TOKEN_LIMIT.toLocaleString('fr-FR')} tokens (${percent} %)\nEntrée : ${usage.inputTokens.toLocaleString('fr-FR')} · Sortie : ${usage.outputTokens.toLocaleString('fr-FR')} · Requêtes : ${usage.requests}\nRestant aujourd’hui : ${remainingTokens().toLocaleString('fr-FR')} tokens`;
 }
 
 function safePath(value = '.') {
@@ -316,13 +426,18 @@ async function callTool(name, raw) {
 }
 
 async function ollama(body) {
+  const remaining = remainingTokens();
+  if (remaining <= 0) throw new Error(`Limite quotidienne de ${DAILY_TOKEN_LIMIT.toLocaleString('fr-FR')} tokens atteinte. Réessayez demain.`);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 180000);
   activeRequest = controller;
   try {
-    const response = await fetch(`${config.ollamaUrl.replace(/\/$/, '')}/api/chat`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, model: config.model, stream: false }), signal: controller.signal });
+    const options = { ...(body.options || {}), num_predict: Math.min(Number(body.options?.num_predict || 4096), remaining) };
+    const response = await fetch(`${config.ollamaUrl.replace(/\/$/, '')}/api/chat`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, options, model: config.model, stream: false }), signal: controller.signal });
     if (!response.ok) throw new Error(`Ollama HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`);
-    return response.json();
+    const result = await response.json();
+    await recordUsage(body, result);
+    return result;
   } finally {
     clearTimeout(timer);
     if (activeRequest === controller) activeRequest = null;
@@ -369,11 +484,25 @@ async function command(line) {
   const value = rest.join(' ');
   if (name === 'exit' || name === 'quit') return false;
   if (name === 'clear') { ui?.clear(); return true; }
-  if (name === 'help') { show('assistant', 'Commandes : /skills, /skill <nom>, /model <nom>, /init, /review <demande>, /config, /clear, /exit'); return true; }
+  if (name === 'help') {
+    show('assistant', `Commandes disponibles\n${COMMANDS.map(command => `${command.name.padEnd(20)} ${command.description}`).join('\n')}\n\nRaccourcis : ↑/↓ naviguer · Tab compléter/afficher l’aide · Esc interrompre`);
+    return true;
+  }
+  if (name === 'usage') { show('assistant', usageText()); return true; }
+  if (name === 'status') {
+    show('assistant', `Workspace : ${workspace}\nModèle : ${config.model}\nSkills actifs : ${enabledSkills.size}\nLimite quotidienne : ${remainingTokens().toLocaleString('fr-FR')} tokens restants\nMode : confirmation obligatoire pour les écritures et commandes`);
+    return true;
+  }
+  if (name === 'new') { messages = []; show('assistant', 'Nouvelle conversation démarrée.'); return true; }
   if (name === 'config') { show('assistant', JSON.stringify(config, null, 2)); return true; }
   if (name === 'model') {
     if (!value) show('assistant', `Modèle actuel : ${config.model}`);
-    else { config.model = value; await saveConfig(); show('assistant', `Modèle sélectionné : ${value}`); }
+    else {
+      const model = resolveModel(value);
+      config.model = model;
+      await saveConfig();
+      show('assistant', model === value ? `Modèle sélectionné : ${model}` : `Alias ${value} → modèle sélectionné : ${model}`);
+    }
     return true;
   }
   if (name === 'skills') {
@@ -402,7 +531,7 @@ async function command(line) {
 }
 
 async function main() {
-  if (args.includes('--help') || args.includes('-h')) return usage();
+  if (args.includes('--help') || args.includes('-h')) return printUsage();
   if (args.includes('--version')) return console.log(VERSION);
   const modelIndex = args.indexOf('--model');
   const promptIndex = args.findIndex(value => value === '-p' || value === '--prompt');
@@ -410,7 +539,8 @@ async function main() {
   if (directory) workspace = path.resolve(directory);
   if (!await exists(workspace)) throw new Error(`Workspace introuvable : ${workspace}`);
   await loadConfig();
-  if (modelIndex >= 0 && args[modelIndex + 1]) config.model = args[modelIndex + 1];
+  await loadUsage();
+  if (modelIndex >= 0 && args[modelIndex + 1]) config.model = resolveModel(args[modelIndex + 1]);
   for (const skill of await skillFiles()) enabledSkills.add(skill.name);
   if (promptIndex >= 0) return agent(args[promptIndex + 1] || '');
   if (output.isTTY && input.isTTY) { ui = new TerminalUI(); ui.start(); ui.render(); }
