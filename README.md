@@ -41,6 +41,7 @@ La configuration se trouve dans `~/.craftpick-code/config.json` (Windows : `%USE
 
 - `/help` : aide
 - `/skills`, `/skill <nom>` : voir ou activer/désactiver les skills
+- `/agents <mission>` : lancer trois sous-agents d’analyse (architecture, implémentation, qualité)
 - `/model <nom>` : sélectionner le modèle Ollama
 - `/init` : créer `CRAFTPICK.md` dans le projet
 - `/review <demande>` : revue de code
@@ -49,3 +50,5 @@ La configuration se trouve dans `~/.craftpick-code/config.json` (Windows : `%USE
 ## Sécurité
 
 Les lectures, écritures et commandes restent confinées au workspace démarré. Toute écriture de fichier ou commande shell demande une confirmation explicite. Les skills peuvent être ajoutés dans `.craftpick/skills/*.md` (projet) ou `~/.craftpick-code/skills/*.md` (utilisateur).
+
+Les sous-agents sont des appels Ollama parallèles sans outils d’écriture ni terminal. Ils reçoivent la mission, le contexte récent et un aperçu local du projet ; leurs tokens comptent dans la limite quotidienne.
