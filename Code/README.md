@@ -38,6 +38,10 @@ Les alias `--model gemma4` et `/model gemma4` sélectionnent `gemma4:31b-cloud`.
 
 Utilisez `/effort low`, `/effort medium` ou `/effort high` pour régler la profondeur de l’analyse et les budgets de réponse. `medium` est la valeur par défaut.
 
+## Mode Pilot
+
+Utilisez `Shift+Tab` dans l’interface, ou `/pilot on` et `/pilot off`, pour basculer le mode Pilot. Il automatise les autorisations pour les écritures et commandes ordinaires du workspace. Le confinement au workspace, le blocage des fichiers sensibles et les confirmations pour les commandes destructives restent obligatoires.
+
 La configuration se trouve dans `~/.craftpick-code/config.json` (Windows : `%USERPROFILE%\.craftpick-code\config.json`). Utilisez `CRAFTPICK_OLLAMA_URL` et `CRAFTPICK_MODEL` pour la surcharger au premier lancement.
 
 ## Commandes
