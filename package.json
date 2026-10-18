@@ -1,0 +1,10 @@
+{
+  "name": "@craftpick/code",
+  "version": "1.0.0",
+  "description": "CraftpickAI Code — local-first coding agent CLI",
+  "type": "module",
+  "bin": { "craftpick-code": "bin/craftpick-code.mjs" },
+  "engines": { "node": ">=20" },
+  "scripts": { "start": "node bin/craftpick-code.mjs", "test": "node --check bin/craftpick-code.mjs" },
+  "license": "MIT"
+}
