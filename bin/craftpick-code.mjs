@@ -45,7 +45,6 @@ const defaults = {
   model: process.env.CRAFTPICK_MODEL || 'gemma4:31b-cloud',
   effort: 'medium',
   permissionMode: 'confirm',
-  maxIterations: 12
 };
 
 let config = { ...defaults };
@@ -705,7 +704,7 @@ async function agent(prompt, planOnly = false) {
   let context = [{ role: 'system', content: instructions }, ...messages, { role: 'user', content: prompt }];
   show('user', prompt);
   ui?.setBusy(true);
-  for (let iteration = 0; iteration < config.maxIterations; iteration += 1) {
+  for (let iteration = 0; ; iteration += 1) {
     const reply = await ollama({ messages: context, tools: tools(planOnly), options: { num_predict: effortSettings().outputTokens } });
     const message = reply.message;
     if (!message) throw new Error('Réponse Ollama invalide');
@@ -727,7 +726,6 @@ async function agent(prompt, planOnly = false) {
       context.push({ role: 'tool', content: typeof result === 'string' ? result : JSON.stringify(result) });
     }
   }
-  throw new Error(`Limite de ${config.maxIterations} itérations atteinte.`);
 }
 
 const AGENT_ROLES = [
