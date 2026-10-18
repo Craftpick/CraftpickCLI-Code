@@ -16,7 +16,7 @@ const USAGE_FILE = path.join(DATA, 'usage.json');
 const SESSIONS_DIR = path.join(DATA, 'sessions');
 const PLUGINS_DIR = path.join(DATA, 'plugins');
 const UNDO_FILE = path.join(DATA, 'last-write-undo.json');
-const DAILY_TOKEN_LIMIT = 10_000_000;
+const DAILY_TOKEN_LIMIT = Infinity;
 const MODEL_ALIASES = {
   gemma4: 'gemma4:31b-cloud',
   'gemma4:31b-cloud': 'gemma4:31b-cloud',
@@ -410,7 +410,7 @@ function totalTokens() {
 }
 
 function remainingTokens() {
-  return Math.max(0, DAILY_TOKEN_LIMIT - totalTokens());
+  return DAILY_TOKEN_LIMIT === Infinity ? Infinity : Math.max(0, DAILY_TOKEN_LIMIT - totalTokens());
 }
 
 async function loadUsage() {
@@ -437,6 +437,7 @@ async function recordUsage(request, response) {
 
 function usageText() {
   const used = totalTokens();
+  if (DAILY_TOKEN_LIMIT === Infinity) return `Usage du ${usage.day}\n${used.toLocaleString('fr-FR')} tokens utilisés\nEntrée : ${usage.inputTokens.toLocaleString('fr-FR')} · Sortie : ${usage.outputTokens.toLocaleString('fr-FR')} · Requêtes : ${usage.requests}\nLimite : illimitée`;
   const percent = Math.min(100, (used / DAILY_TOKEN_LIMIT) * 100).toFixed(2);
   return `Usage du ${usage.day}\n${used.toLocaleString('fr-FR')} / ${DAILY_TOKEN_LIMIT.toLocaleString('fr-FR')} tokens (${percent} %)\nEntrée : ${usage.inputTokens.toLocaleString('fr-FR')} · Sortie : ${usage.outputTokens.toLocaleString('fr-FR')} · Requêtes : ${usage.requests}\nRestant aujourd’hui : ${remainingTokens().toLocaleString('fr-FR')} tokens`;
 }
